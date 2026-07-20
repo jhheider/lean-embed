@@ -1,0 +1,40 @@
+[package]
+name = "lean-embed"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Jacob Heider <jhheider@gmail.com>"]
+repository = "https://github.com/jhheider/lean-embed"
+license = "MIT OR Apache-2.0"
+description = "Lean, provider-agnostic text-embeddings client for Voyage AI and Ollama, on rustls + ring (no OpenSSL, no aws-lc)."
+readme = "README.md"
+keywords = ["embeddings", "voyage", "ollama", "rustls", "ai"]
+categories = ["api-bindings", "text-processing"]
+
+[dependencies]
+# The wire: reqwest with rustls + ring only. default-features = false drops
+# reqwest's default rustls provider (aws-lc-rs) and native-tls (openssl); the
+# `rustls-no-provider` feature lets us install ring ourselves at construction.
+# Keep `cargo tree -i aws-lc-sys` / `-i openssl-sys` empty - that is the crate's
+# whole reason to exist.
+reqwest = { version = "0.13", default-features = false, features = [
+    "charset",
+    "http2",
+    "json",
+    "rustls-no-provider",
+    "system-proxy",
+] }
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+# Async test harness + an offline HTTP mock so the request/response round-trip
+# is exercised without a live Voyage/Ollama endpoint.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"

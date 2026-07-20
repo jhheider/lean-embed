@@ -1,0 +1,302 @@
+use serde_json::json;
+use wiremock::matchers::{body_partial_json, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+use super::*;
+
+// ---- Pure wire (de)serialization -----------------------------------------
+
+#[test]
+fn ollama_request_serializes_to_model_and_input() {
+    let body = OllamaRequest {
+        model: "nomic-embed-text",
+        input: &["a".to_string(), "b".to_string()],
+    };
+    let j = serde_json::to_value(&body).unwrap();
+    assert_eq!(j["model"], "nomic-embed-text");
+    assert_eq!(j["input"][1], "b");
+}
+
+#[test]
+fn ollama_response_parses_embeddings() {
+    let r: OllamaResponse =
+        serde_json::from_str(r#"{"embeddings":[[0.1,0.2],[0.3,0.4]]}"#).unwrap();
+    assert_eq!(r.embeddings.len(), 2);
+    assert_eq!(r.embeddings[0], vec![0.1, 0.2]);
+}
+
+#[test]
+fn voyage_request_carries_input_type_and_dim() {
+    let body = VoyageRequest {
+        input: &["q".to_string()],
+        model: "voyage-3.5-lite",
+        input_type: EmbedKind::Query.as_str(),
+        output_dimension: Some(1024),
+    };
+    let j = serde_json::to_value(&body).unwrap();
+    assert_eq!(j["input_type"], "query");
+    assert_eq!(j["model"], "voyage-3.5-lite");
+    assert_eq!(j["output_dimension"], 1024);
+}
+
+#[test]
+fn voyage_request_omits_dim_when_unset() {
+    let body = VoyageRequest {
+        input: &["q".to_string()],
+        model: "m",
+        input_type: EmbedKind::Document.as_str(),
+        output_dimension: None,
+    };
+    let j = serde_json::to_value(&body).unwrap();
+    assert!(j.get("output_dimension").is_none());
+}
+
+#[test]
+fn voyage_response_parses_and_sorts_by_index() {
+    let r: VoyageResponse = serde_json::from_str(
+        r#"{"data":[{"embedding":[2.0],"index":1},{"embedding":[1.0],"index":0}]}"#,
+    )
+    .unwrap();
+    let mut data = r.data;
+    data.sort_by_key(|d| d.index);
+    assert_eq!(data[0].embedding, vec![1.0]);
+    assert_eq!(data[1].embedding, vec![2.0]);
+}
+
+// ---- Builder / config ----------------------------------------------------
+
+#[test]
+fn base_url_defaults_per_provider() {
+    let ollama = Client::builder(Provider::Ollama, "m").build().unwrap();
+    assert_eq!(ollama.base_url, "http://localhost:11434");
+    let voyage = Client::builder(Provider::Voyage, "m")
+        .api_key("k")
+        .build()
+        .unwrap();
+    assert_eq!(voyage.base_url, "https://api.voyageai.com/v1");
+}
+
+#[test]
+fn base_url_override_is_trimmed() {
+    let c = Client::builder(Provider::Ollama, "m")
+        .base_url("http://host:1234/")
+        .build()
+        .unwrap();
+    assert_eq!(c.base_url, "http://host:1234");
+    // Blank override falls back to the default.
+    let c2 = Client::builder(Provider::Ollama, "m")
+        .base_url("   ")
+        .build()
+        .unwrap();
+    assert_eq!(c2.base_url, "http://localhost:11434");
+}
+
+#[test]
+fn ollama_needs_no_key() {
+    let c = Client::builder(Provider::Ollama, "m").build().unwrap();
+    assert!(c.api_key.is_none());
+    assert_eq!(c.provider(), Provider::Ollama);
+}
+
+#[test]
+fn voyage_key_from_builder_wins() {
+    let c = Client::builder(Provider::Voyage, "m")
+        .api_key("explicit")
+        .build()
+        .unwrap();
+    assert_eq!(c.api_key.as_deref(), Some("explicit"));
+}
+
+#[test]
+fn voyage_without_key_errors_when_env_unset() {
+    // Only meaningful when the ambient environment has no key; skip otherwise
+    // so the suite stays deterministic without mutating process env.
+    if std::env::var(VOYAGE_API_KEY_ENV).is_ok() {
+        return;
+    }
+    let err = Client::builder(Provider::Voyage, "m").build().unwrap_err();
+    assert!(matches!(err, Error::MissingApiKey { .. }));
+}
+
+// ---- HTTP round-trip (offline mock) --------------------------------------
+
+#[tokio::test]
+async fn ollama_round_trip_returns_vectors() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/embed"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"embeddings": [[0.1, 0.2], [0.3, 0.4]]})),
+        )
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::Ollama, "nomic-embed-text")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+    let v = client
+        .embed(&["a".into(), "b".into()], EmbedKind::Document)
+        .await
+        .unwrap();
+    assert_eq!(v, vec![vec![0.1, 0.2], vec![0.3, 0.4]]);
+}
+
+#[tokio::test]
+async fn voyage_round_trip_sorts_and_sends_dim_and_type() {
+    let server = MockServer::start().await;
+    // The mock only matches if the body carried the query input_type and the
+    // pinned dimension - so a match proves the wire fields were sent.
+    Mock::given(method("POST"))
+        .and(path("/embeddings"))
+        .and(body_partial_json(
+            json!({"input_type": "query", "output_dimension": 2}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [
+                {"embedding": [9.0, 9.0], "index": 1},
+                {"embedding": [1.0, 1.0], "index": 0}
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::Voyage, "voyage-3.5-lite")
+        .api_key("k")
+        .base_url(server.uri())
+        .output_dimension(2)
+        .build()
+        .unwrap();
+    let v = client
+        .embed(&["x".into(), "y".into()], EmbedKind::Query)
+        .await
+        .unwrap();
+    // Sorted back into input order despite the out-of-order response.
+    assert_eq!(v, vec![vec![1.0, 1.0], vec![9.0, 9.0]]);
+}
+
+#[tokio::test]
+async fn non_success_status_becomes_api_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/embed"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("model loading"))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::Ollama, "m")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+    let err = client
+        .embed(&["a".into()], EmbedKind::Document)
+        .await
+        .unwrap_err();
+    match err {
+        Error::Api {
+            provider,
+            status,
+            body,
+        } => {
+            assert_eq!(provider, "ollama");
+            assert_eq!(status, 503);
+            assert!(body.contains("model loading"));
+        }
+        other => panic!("expected Api error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn pinned_dimension_mismatch_is_caught() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/embed"))
+        // Returns width 2 while the client pinned 1024.
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"embeddings": [[0.1, 0.2]]})))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::Ollama, "m")
+        .base_url(server.uri())
+        .output_dimension(1024)
+        .build()
+        .unwrap();
+    let err = client
+        .embed(&["a".into()], EmbedKind::Document)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        Error::DimMismatch {
+            got: 2,
+            expected: 1024,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn count_mismatch_is_caught() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/embed"))
+        // One vector for two inputs.
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"embeddings": [[0.1]]})))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::Ollama, "m")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+    let err = client
+        .embed(&["a".into(), "b".into()], EmbedKind::Document)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        Error::CountMismatch {
+            got: 1,
+            expected: 2,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn empty_input_short_circuits_without_a_request() {
+    // No mock mounted: if embed hit the network this would error.
+    let server = MockServer::start().await;
+    let client = Client::builder(Provider::Ollama, "m")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+    let v = client.embed(&[], EmbedKind::Document).await.unwrap();
+    assert!(v.is_empty());
+}
+
+#[tokio::test]
+async fn max_batch_splits_requests_and_preserves_order() {
+    let server = MockServer::start().await;
+    // Each single-input request returns one vector; expect exactly 3 calls for
+    // 3 inputs at max_batch(1).
+    Mock::given(method("POST"))
+        .and(path("/api/embed"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"embeddings": [[7.0]]})))
+        .expect(3)
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::Ollama, "m")
+        .base_url(server.uri())
+        .max_batch(1)
+        .build()
+        .unwrap();
+    let v = client
+        .embed(&["a".into(), "b".into(), "c".into()], EmbedKind::Document)
+        .await
+        .unwrap();
+    assert_eq!(v, vec![vec![7.0], vec![7.0], vec![7.0]]);
+    // `.expect(3)` is verified on drop of the server.
+}
