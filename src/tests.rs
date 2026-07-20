@@ -300,3 +300,125 @@ async fn max_batch_splits_requests_and_preserves_order() {
     assert_eq!(v, vec![vec![7.0], vec![7.0], vec![7.0]]);
     // `.expect(3)` is verified on drop of the server.
 }
+
+#[tokio::test]
+async fn malformed_json_becomes_decode_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/embed"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("definitely not json"))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::Ollama, "m")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+    let err = client
+        .embed(&["a".into()], EmbedKind::Document)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        Error::Decode {
+            provider: "ollama",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn voyage_malformed_json_becomes_decode_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/embeddings"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{ nope"))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::Voyage, "m")
+        .api_key("k")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+    let err = client
+        .embed(&["a".into()], EmbedKind::Query)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        Error::Decode {
+            provider: "voyage",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn unreachable_endpoint_becomes_request_error() {
+    // Port 1 refuses immediately; a tight timeout also exercises the builder.
+    let client = Client::builder(Provider::Ollama, "m")
+        .base_url("http://127.0.0.1:1")
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let err = client
+        .embed(&["a".into()], EmbedKind::Document)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        Error::Request {
+            provider: "ollama",
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
+async fn voyage_unreachable_endpoint_becomes_request_error() {
+    let client = Client::builder(Provider::Voyage, "m")
+        .api_key("k")
+        .base_url("http://127.0.0.1:1")
+        .build()
+        .unwrap();
+    let err = client
+        .embed(&["a".into()], EmbedKind::Query)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        Error::Request {
+            provider: "voyage",
+            ..
+        }
+    ));
+}
+
+/// The `Display` strings that thiserror derives, exercised for the variants a
+/// caller is most likely to surface to a user.
+#[test]
+fn error_display_strings() {
+    let api = Error::Api {
+        provider: "voyage",
+        status: 429,
+        body: "rate limited".into(),
+    };
+    assert_eq!(api.to_string(), "voyage returned HTTP 429: rate limited");
+
+    let dim = Error::DimMismatch {
+        provider: "voyage",
+        got: 512,
+        expected: 1024,
+    };
+    assert_eq!(
+        dim.to_string(),
+        "voyage returned dimension 512 (expected 1024)"
+    );
+
+    let missing = Error::MissingApiKey {
+        provider: "voyage",
+        env: VOYAGE_API_KEY_ENV,
+    };
+    assert!(missing.to_string().contains("VOYAGE_API_KEY"));
+}

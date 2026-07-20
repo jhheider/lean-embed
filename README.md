@@ -37,23 +37,25 @@ lean-embed = "0.1"
 ```rust
 use lean_embed::{Client, EmbedKind, Provider};
 
-# async fn run() -> Result<(), lean_embed::Error> {
-// Local Ollama - no key, offline.
-let ollama = Client::builder(Provider::Ollama, "nomic-embed-text").build()?;
-let vectors = ollama
-    .embed(&["hello".into(), "world".into()], EmbedKind::Document)
-    .await?;
+async fn embed_examples() -> Result<(), lean_embed::Error> {
+    // Local Ollama - no key, offline.
+    let ollama = Client::builder(Provider::Ollama, "nomic-embed-text").build()?;
+    let vectors = ollama
+        .embed(&["hello".into(), "world".into()], EmbedKind::Document)
+        .await?;
 
-// Hosted Voyage, pinned to 1024 dimensions (key from VOYAGE_API_KEY,
-// or pass .api_key(..)). max_batch splits large batches transparently.
-let voyage = Client::builder(Provider::Voyage, "voyage-3.5-lite")
-    .output_dimension(1024)
-    .max_batch(96)
-    .build()?;
-let query = voyage.embed(&["how do I center clay?".into()], EmbedKind::Query).await?;
-# let _ = (vectors, query);
-# Ok(())
-# }
+    // Hosted Voyage, pinned to 1024 dimensions (key from VOYAGE_API_KEY,
+    // or pass .api_key(..)). max_batch splits large batches transparently.
+    let voyage = Client::builder(Provider::Voyage, "voyage-3.5-lite")
+        .output_dimension(1024)
+        .max_batch(96)
+        .build()?;
+    let query = voyage
+        .embed(&["how do I center clay?".into()], EmbedKind::Query)
+        .await?;
+
+    Ok(())
+}
 ```
 
 ### Notes

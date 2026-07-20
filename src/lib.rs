@@ -36,6 +36,9 @@
 //! [Voyage AI]: https://www.voyageai.com/
 //! [Ollama]: https://ollama.com/
 
+#![warn(missing_docs)]
+#![warn(rustdoc::broken_intra_doc_links)]
+
 use std::sync::Once;
 use std::time::Duration;
 
@@ -85,7 +88,9 @@ impl Provider {
 /// retrieves better); Ollama ignores it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmbedKind {
+    /// A stored document (Voyage `input_type = "document"`).
     Document,
+    /// A search query (Voyage `input_type = "query"`).
     Query,
 }
 
@@ -111,7 +116,9 @@ pub enum Error {
     /// variable is unset.
     #[error("{provider}: no API key (pass .api_key(..) or set {env})")]
     MissingApiKey {
+        /// The provider that needed a key (`"voyage"`).
         provider: &'static str,
+        /// The environment variable that was consulted ([`VOYAGE_API_KEY_ENV`]).
         env: &'static str,
     },
 
@@ -119,7 +126,9 @@ pub enum Error {
     /// For Ollama this usually means the server is not running.
     #[error("{provider} request failed: {source}")]
     Request {
+        /// The provider the request targeted.
         provider: &'static str,
+        /// The underlying transport error.
         #[source]
         source: reqwest::Error,
     },
@@ -127,15 +136,20 @@ pub enum Error {
     /// The provider answered with a non-success status; `body` is its message.
     #[error("{provider} returned HTTP {status}: {body}")]
     Api {
+        /// The provider that returned the error.
         provider: &'static str,
+        /// The HTTP status code.
         status: u16,
+        /// The response body (the provider's error message).
         body: String,
     },
 
     /// The success response could not be decoded into the expected shape.
     #[error("{provider} failed to decode response: {source}")]
     Decode {
+        /// The provider whose response failed to decode.
         provider: &'static str,
+        /// The underlying decode error.
         #[source]
         source: reqwest::Error,
     },
@@ -143,8 +157,11 @@ pub enum Error {
     /// The provider returned a different number of vectors than inputs given.
     #[error("{provider} returned {got} embeddings for {expected} inputs")]
     CountMismatch {
+        /// The provider that returned the wrong count.
         provider: &'static str,
+        /// How many vectors came back.
         got: usize,
+        /// How many were expected (one per input).
         expected: usize,
     },
 
@@ -153,8 +170,11 @@ pub enum Error {
     /// column (e.g. pgvector `vector(1024)`).
     #[error("{provider} returned dimension {got} (expected {expected})")]
     DimMismatch {
+        /// The provider that returned the wrong width.
         provider: &'static str,
+        /// The width actually returned.
         got: usize,
+        /// The pinned [`ClientBuilder::output_dimension`].
         expected: usize,
     },
 }
