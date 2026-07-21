@@ -71,7 +71,7 @@ async fn output_dimension_is_arbitrary() {
 #[tokio::test]
 #[ignore = "needs VOYAGE_API_KEY and network"]
 async fn query_and_document_vectors_are_asymmetric() {
-    // The same text embedded as a query vs a document should differ - that's
+    // The same text embedded as a query vs a document should differ, which is
     // the whole point of input_type, and it's what EmbedKind selects.
     let c = client(Some(1024));
     let text = "how do I center clay on the wheel";

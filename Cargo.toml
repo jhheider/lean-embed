@@ -15,7 +15,7 @@ categories = ["api-bindings", "text-processing"]
 # The wire: reqwest with rustls + ring only. default-features = false drops
 # reqwest's default rustls provider (aws-lc-rs) and native-tls (openssl); the
 # `rustls-no-provider` feature lets us install ring ourselves at construction.
-# Keep `cargo tree -i aws-lc-sys` / `-i openssl-sys` empty - that is the crate's
+# Keep `cargo tree -i aws-lc-sys` / `-i openssl-sys` empty; that is the crate's
 # whole reason to exist.
 reqwest = { version = "0.13", default-features = false, features = [
     "charset",

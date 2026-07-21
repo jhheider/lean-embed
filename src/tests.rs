@@ -91,7 +91,7 @@ async fn ollama_round_trip_returns_vectors() {
 async fn voyage_round_trip_sorts_and_sends_dim_and_type() {
     let server = MockServer::start().await;
     // The mock only matches if the body carried the query input_type and the
-    // pinned dimension - so a match proves the wire fields were sent.
+    // pinned dimension, so a match proves the wire fields were sent.
     Mock::given(method("POST"))
         .and(path("/embeddings"))
         .and(body_partial_json(

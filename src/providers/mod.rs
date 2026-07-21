@@ -1,7 +1,7 @@
 //! Provider wire implementations. Each submodule owns exactly one provider's
 //! request/response types and its `embed` function; [`Client::embed`] dispatches
 //! to them. Adding a provider is a new file here plus a [`Provider`] variant and
-//! a match arm - no other module changes.
+//! a match arm, with no other module changes.
 //!
 //! [`Client::embed`]: crate::Client::embed
 

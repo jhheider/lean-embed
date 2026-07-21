@@ -11,7 +11,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - Initial release: a provider-agnostic embeddings client on rustls + ring (no
-  OpenSSL, no aws-lc), with four providers - **Voyage**, **OpenAI** (and any
+  OpenSSL, no aws-lc), with four providers: **Voyage**, **OpenAI** (and any
   OpenAI-compatible endpoint), **Gemini**, and **Ollama** (local, offline).
 - `Client` / `ClientBuilder` with `base_url`, `api_key`, `output_dimension`,
   `timeout`, and `max_batch` (transparent request splitting).

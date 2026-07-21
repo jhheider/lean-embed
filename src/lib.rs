@@ -1,14 +1,14 @@
 //! A lean, provider-agnostic text-embeddings client.
 //!
 //! One [`Client`] turns batches of text into vectors against any of four
-//! [`Provider`]s - **[Voyage AI]**, **[OpenAI]** (or any OpenAI-compatible
-//! endpoint), **[Gemini]**, or **[Ollama]** (local, no key, offline) - behind a
-//! single [`embed`](Client::embed) call. [`EmbedKind`] selects query- vs
-//! document-side vectors where the provider supports it, and an optional
+//! [`Provider`]s: **[Voyage AI]**, **[OpenAI]** (or any OpenAI-compatible
+//! endpoint), **[Gemini]**, or **[Ollama]** (local, no key, offline). One
+//! [`embed`](Client::embed) call reaches them all. [`EmbedKind`] selects query-
+//! vs document-side vectors where the provider supports it, and an optional
 //! [`output_dimension`](ClientBuilder::output_dimension) is requested *and*
 //! validated so a model drift can't silently desync a fixed-width column.
 //!
-//! The wire is [`reqwest`] on **rustls + ring** only - never OpenSSL or aws-lc -
+//! The wire is [`reqwest`] on **rustls + ring** only, never OpenSSL or aws-lc,
 //! so the dependency tree stays small and cross-compiles cleanly (musl,
 //! aarch64). That lean stack is the reason this crate exists instead of a full
 //! agent/RAG framework: it is *only* the embeddings HTTP client, so a vector
@@ -20,7 +20,7 @@
 //! use lean_embed::{Client, EmbedKind, Provider};
 //!
 //! # async fn run() -> Result<(), lean_embed::Error> {
-//! // Local Ollama - no key, offline.
+//! // Local Ollama, no key, offline.
 //! let client = Client::builder(Provider::Ollama, "nomic-embed-text").build()?;
 //! let vectors = client
 //!     .embed(&["hello".into(), "world".into()], EmbedKind::Document)
@@ -83,7 +83,7 @@ pub enum Provider {
     /// OpenAI, or any OpenAI-compatible `/v1/embeddings` endpoint (together.ai,
     /// vLLM, LocalAI, ...) via a `base_url` override. Default
     /// `https://api.openai.com/v1`. Needs [`OPENAI_API_KEY_ENV`]; honours
-    /// `dimensions` ([`ClientBuilder::output_dimension`]). Symmetric - ignores
+    /// `dimensions` ([`ClientBuilder::output_dimension`]). Symmetric, so ignores
     /// [`EmbedKind`].
     OpenAi,
     /// Google Gemini (Generative Language API,
@@ -160,7 +160,7 @@ impl EmbedKind {
 
 /// A transport/decoding error, kept opaque on purpose. The concrete HTTP
 /// backend ([`reqwest`]) is an implementation detail, so it is boxed rather than
-/// exposed in the public API - a reqwest major bump must not force a breaking
+/// exposed in the public API; a reqwest major bump must not force a breaking
 /// release of this crate. The message and [`std::error::Error::source`] chain
 /// are preserved.
 pub type TransportError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -237,7 +237,7 @@ pub enum Error {
     },
 
     /// An `output_dimension` was pinned but a returned vector had a different
-    /// width - a schema-desync guard for callers that store into a fixed-width
+    /// width: a schema-desync guard for callers that store into a fixed-width
     /// column (e.g. pgvector `vector(1024)`).
     #[error("{provider} returned dimension {got} (expected {expected})")]
     #[non_exhaustive]
@@ -333,7 +333,7 @@ impl ClientBuilder {
     }
 
     /// Finish building. Installs the ring TLS provider, constructs the HTTP
-    /// client, and - for a keyed provider - resolves the API key (erroring with
+    /// client, and, for a keyed provider, resolves the API key (erroring with
     /// [`Error::MissingApiKey`] if it is neither passed nor in the provider's
     /// environment variable).
     pub fn build(self) -> Result<Client, Error> {
@@ -435,7 +435,7 @@ impl Client {
     /// **No retry or backoff.** A transient failure (network blip, a `429`
     /// rate-limit) returns `Err` immediately; if it happens partway through a
     /// split batch, the vectors already fetched in this call are discarded.
-    /// Resilience is deliberately the caller's job - inspect [`Error::Api`]'s
+    /// Resilience is deliberately the caller's job: inspect [`Error::Api`]'s
     /// `status` and re-invoke `embed` if you need it.
     pub async fn embed(&self, texts: &[String], kind: EmbedKind) -> Result<Vec<Vec<f32>>, Error> {
         if texts.is_empty() {

@@ -22,7 +22,7 @@ jobs:
 
   # The crate's whole reason to exist: enforce the lean-deps commitment so a
   # routine `cargo update` can't quietly pull in aws-lc-sys / openssl-sys
-  # (reqwest's default rustls provider is aws-lc-rs - we keep it out).
+  # (reqwest's default rustls provider is aws-lc-rs, which we keep out).
   lean:
     name: Lean deps (no aws-lc / openssl)
     runs-on: ubuntu-latest
@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           for crate in aws-lc-sys openssl-sys; do
             if cargo tree -i "$crate" >/dev/null 2>&1; then
-              echo "::error::$crate is in the dependency tree - the lean commitment is broken"
+              echo "::error::$crate is in the dependency tree; the lean commitment is broken"
               cargo tree -i "$crate" || true
               exit 1
             fi

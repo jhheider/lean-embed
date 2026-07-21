@@ -3,10 +3,10 @@
 A **lean, provider-agnostic text-embeddings client** for Rust. One small client
 turns batches of text into vectors against **[OpenAI]** (or any OpenAI-compatible
 endpoint), **[Gemini]**, **[Voyage AI]**, or **[Ollama]** (local, offline, no
-API key) - and nothing more. No vector store, no chunking, no agent loop: just
+API key), and nothing more. No vector store, no chunking, no agent loop: just
 the embeddings HTTP call, so your retrieval stack stays yours.
 
-The wire is [`reqwest`] on **rustls + [ring]** only - **never OpenSSL, never
+The wire is [`reqwest`] on **rustls + [ring]** only: **never OpenSSL, never
 aws-lc**. That is the whole reason this crate exists instead of reaching for a
 full agent/RAG framework: the dependency tree stays small and cross-compiles
 cleanly to musl and aarch64. `cargo tree -i aws-lc-sys` and `-i openssl-sys` are
@@ -16,9 +16,9 @@ empty, and staying that way is a standing commitment.
 
 - **`rig`** is the only crate with first-class Voyage + Ollama, but its TLS is
   hardwired to reqwest's rustls default (aws-lc-rs) or native-tls (OpenSSL) with
-  no ring path - and it is a full agent/RAG framework for one `embed()` call.
+  no ring path, and it is a full agent/RAG framework for one `embed()` call.
 - **`async-openai`** ships clean deps (even `rustls-no-provider`) but is
-  OpenAI-only - no Voyage, Gemini, or Ollama, each of which has its own wire
+  OpenAI-only: no Voyage, Gemini, or Ollama, each of which has its own wire
   shape and asymmetry knob.
 - A **RAG framework's** value is its store + pipeline; but each real consumer
   already owns a *different* store (pgvector-in-Postgres here, an offline
@@ -38,7 +38,7 @@ lean-embed = "0.1"
 use lean_embed::{Client, EmbedKind, Provider};
 
 async fn embed_examples() -> Result<(), lean_embed::Error> {
-    // Local Ollama - no key, offline.
+    // Local Ollama, no key, offline.
     let ollama = Client::builder(Provider::Ollama, "nomic-embed-text").build()?;
     let vectors = ollama
         .embed(&["hello".into(), "world".into()], EmbedKind::Document)
@@ -70,7 +70,7 @@ async fn embed_examples() -> Result<(), lean_embed::Error> {
   better. OpenAI is symmetric and Ollama is local; both ignore it.
 - **`output_dimension`** is requested where the provider supports it (Voyage
   `output_dimension`, OpenAI `dimensions`, Gemini `outputDimensionality`) and,
-  for *every* provider, validated against every returned vector - so a model
+  for *every* provider, validated against every returned vector, so a model
   drifting off your stored width becomes an `Error::DimMismatch` instead of a
   silent schema desync.
 - **`max_batch`** caps inputs per HTTP request; larger batches are split into

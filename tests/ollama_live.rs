@@ -6,7 +6,7 @@
 //! cargo test --test ollama_live -- --ignored --nocapture
 //! ```
 //!
-//! These prove the real round-trip - correct dimensions, order-preserving batch
+//! These prove the real round-trip: correct dimensions, order-preserving batch
 //! splitting, dim-pin validation, and that the vectors are semantically sane
 //! (a query lands nearer the relevant document than an unrelated one).
 
