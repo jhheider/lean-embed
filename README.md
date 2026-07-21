@@ -85,7 +85,7 @@ async fn embed_examples() -> Result<(), lean_embed::Error> {
 
 | Provider | Endpoint | Key env | Offline | `EmbedKind` |
 |----------|----------|---------|---------|-------------|
-| Ollama   | `{base}/api/embed` (default `http://localhost:11434`) | — | yes | ignored |
+| Ollama   | `{base}/api/embed` (default `http://localhost:11434`) | none | yes | ignored |
 | Voyage   | `{base}/embeddings` (default `https://api.voyageai.com/v1`) | `VOYAGE_API_KEY` | no | `input_type` |
 | OpenAI   | `{base}/embeddings` (default `https://api.openai.com/v1`) | `OPENAI_API_KEY` | no | symmetric (ignored) |
 | Gemini   | `{base}/models/{model}:batchEmbedContents` (default `…/v1beta`) | `GEMINI_API_KEY` | no | `taskType` |
