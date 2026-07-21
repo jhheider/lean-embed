@@ -1,9 +1,7 @@
 name: CI
 
-# Thin caller over jhheider/rust-ci. lean-embed is a PRIVATE repo, so CI routes
-# to the self-hosted arm64 runner (studio-lean-embed). If this repo ever goes
-# public, revert to the default hosted 3-OS matrix (drop os/runs-on, add
-# `coverage: true`) and remove the gha-runner service.
+# Thin caller over jhheider/rust-ci. Public repo: the default hosted 3-OS matrix
+# with coverage.
 on:
   push:
     branches: [main]
@@ -19,8 +17,7 @@ jobs:
   ci:
     uses: jhheider/rust-ci/.github/workflows/ci.yml@v1
     with:
-      os: '["self-hosted"]'
-      runs-on: self-hosted
+      coverage: true
     secrets: inherit
 
   # The crate's whole reason to exist: enforce the lean-deps commitment so a
@@ -28,7 +25,7 @@ jobs:
   # (reqwest's default rustls provider is aws-lc-rs - we keep it out).
   lean:
     name: Lean deps (no aws-lc / openssl)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
