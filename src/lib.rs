@@ -49,8 +49,6 @@
 use std::sync::Once;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
 /// Default request timeout: generous, because a cold Ollama model load can take
 /// several seconds before the first byte.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -447,10 +445,10 @@ impl Client {
         let mut out = Vec::with_capacity(texts.len());
         for chunk in texts.chunks(batch) {
             let vectors = match self.provider {
-                Provider::Ollama => self.embed_ollama(chunk).await?,
-                Provider::Voyage => self.embed_voyage(chunk, kind).await?,
-                Provider::OpenAi => self.embed_openai(chunk).await?,
-                Provider::Gemini => self.embed_gemini(chunk, kind).await?,
+                Provider::Ollama => providers::ollama::embed(self, chunk).await?,
+                Provider::Voyage => providers::voyage::embed(self, chunk, kind).await?,
+                Provider::OpenAi => providers::openai::embed(self, chunk).await?,
+                Provider::Gemini => providers::gemini::embed(self, chunk, kind).await?,
             };
             out.extend(vectors);
         }
@@ -463,109 +461,6 @@ impl Client {
         self.api_key
             .as_deref()
             .expect("invariant: build() resolves an api_key for keyed providers")
-    }
-
-    async fn embed_ollama(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, Error> {
-        let url = format!("{}/api/embed", self.base_url);
-        let body = OllamaRequest {
-            model: &self.model,
-            input: texts,
-        };
-        let resp = self
-            .http
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(request_err(Provider::Ollama))?;
-        let resp = error_for_status(Provider::Ollama, resp).await?;
-        let parsed: OllamaResponse = resp.json().await.map_err(decode_err(Provider::Ollama))?;
-        Ok(parsed.embeddings)
-    }
-
-    async fn embed_voyage(
-        &self,
-        texts: &[String],
-        kind: EmbedKind,
-    ) -> Result<Vec<Vec<f32>>, Error> {
-        let url = format!("{}/embeddings", self.base_url);
-        let body = VoyageRequest {
-            input: texts,
-            model: &self.model,
-            input_type: kind.as_str(),
-            output_dimension: self.output_dimension,
-        };
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(self.require_key())
-            .json(&body)
-            .send()
-            .await
-            .map_err(request_err(Provider::Voyage))?;
-        let resp = error_for_status(Provider::Voyage, resp).await?;
-        let parsed: DataResponse = resp.json().await.map_err(decode_err(Provider::Voyage))?;
-        Ok(sorted_by_index(parsed.data))
-    }
-
-    async fn embed_openai(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, Error> {
-        let url = format!("{}/embeddings", self.base_url);
-        let body = OpenAiRequest {
-            input: texts,
-            model: &self.model,
-            encoding_format: "float",
-            dimensions: self.output_dimension,
-        };
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(self.require_key())
-            .json(&body)
-            .send()
-            .await
-            .map_err(request_err(Provider::OpenAi))?;
-        let resp = error_for_status(Provider::OpenAi, resp).await?;
-        let parsed: DataResponse = resp.json().await.map_err(decode_err(Provider::OpenAi))?;
-        Ok(sorted_by_index(parsed.data))
-    }
-
-    async fn embed_gemini(
-        &self,
-        texts: &[String],
-        kind: EmbedKind,
-    ) -> Result<Vec<Vec<f32>>, Error> {
-        // Gemini names the model in the URL path and each sub-request, always
-        // `models/`-prefixed.
-        let model = if self.model.starts_with("models/") {
-            self.model.clone()
-        } else {
-            format!("models/{}", self.model)
-        };
-        let url = format!("{}/{}:batchEmbedContents", self.base_url, model);
-        let requests = texts
-            .iter()
-            .map(|t| GeminiEmbedRequest {
-                model: &model,
-                content: GeminiContent {
-                    parts: [GeminiPart { text: t }],
-                },
-                task_type: kind.gemini_task_type(),
-                output_dimensionality: self.output_dimension,
-            })
-            .collect();
-        let body = GeminiRequest { requests };
-        let resp = self
-            .http
-            .post(&url)
-            .header("x-goog-api-key", self.require_key())
-            .json(&body)
-            .send()
-            .await
-            .map_err(request_err(Provider::Gemini))?;
-        let resp = error_for_status(Provider::Gemini, resp).await?;
-        let parsed: GeminiResponse = resp.json().await.map_err(decode_err(Provider::Gemini))?;
-        // Gemini returns embeddings in request order (no index field).
-        Ok(parsed.embeddings.into_iter().map(|e| e.values).collect())
     }
 
     /// Enforce one vector per input and, if a dimension was pinned, that every
@@ -594,131 +489,7 @@ impl Client {
     }
 }
 
-/// Turn a non-success HTTP response into an [`Error::Api`] carrying the body.
-async fn error_for_status(
-    provider: Provider,
-    resp: reqwest::Response,
-) -> Result<reqwest::Response, Error> {
-    if resp.status().is_success() {
-        return Ok(resp);
-    }
-    let status = resp.status().as_u16();
-    let body = resp.text().await.unwrap_or_default();
-    Err(Error::Api {
-        provider: provider.label(),
-        status,
-        body,
-    })
-}
-
-/// Map a transport error to [`Error::Request`], boxing it opaque.
-fn request_err(provider: Provider) -> impl FnOnce(reqwest::Error) -> Error {
-    move |e| Error::Request {
-        provider: provider.label(),
-        source: Box::new(e),
-    }
-}
-
-/// Map a decode error to [`Error::Decode`], boxing it opaque.
-fn decode_err(provider: Provider) -> impl FnOnce(reqwest::Error) -> Error {
-    move |e| Error::Decode {
-        provider: provider.label(),
-        source: Box::new(e),
-    }
-}
-
-/// Reorder an OpenAI-style `data` array by its `index` and drop to bare vectors.
-/// The APIs return data in input order, but sorting is cheap insurance.
-fn sorted_by_index(mut data: Vec<EmbeddingDatum>) -> Vec<Vec<f32>> {
-    data.sort_by_key(|d| d.index);
-    data.into_iter().map(|d| d.embedding).collect()
-}
-
-// ---- Wire types ----------------------------------------------------------
-
-// Ollama: `{base}/api/embed`.
-#[derive(Serialize)]
-struct OllamaRequest<'a> {
-    model: &'a str,
-    input: &'a [String],
-}
-
-#[derive(Deserialize)]
-struct OllamaResponse {
-    embeddings: Vec<Vec<f32>>,
-}
-
-// Voyage: `{base}/embeddings`.
-#[derive(Serialize)]
-struct VoyageRequest<'a> {
-    input: &'a [String],
-    model: &'a str,
-    input_type: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    output_dimension: Option<usize>,
-}
-
-// OpenAI (and OpenAI-compatible): `{base}/embeddings`. Symmetric, so no
-// input_type; `dimensions` is OpenAI's name for the requested width.
-#[derive(Serialize)]
-struct OpenAiRequest<'a> {
-    input: &'a [String],
-    model: &'a str,
-    encoding_format: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    dimensions: Option<usize>,
-}
-
-/// The response shape shared by Voyage and OpenAI: `{"data":[{embedding,index}]}`.
-#[derive(Deserialize)]
-struct DataResponse {
-    data: Vec<EmbeddingDatum>,
-}
-
-#[derive(Deserialize)]
-struct EmbeddingDatum {
-    embedding: Vec<f32>,
-    index: usize,
-}
-
-// Gemini: `{base}/models/{model}:batchEmbedContents`.
-#[derive(Serialize)]
-struct GeminiRequest<'a> {
-    requests: Vec<GeminiEmbedRequest<'a>>,
-}
-
-#[derive(Serialize)]
-struct GeminiEmbedRequest<'a> {
-    model: &'a str,
-    content: GeminiContent<'a>,
-    #[serde(rename = "taskType")]
-    task_type: &'a str,
-    #[serde(
-        rename = "outputDimensionality",
-        skip_serializing_if = "Option::is_none"
-    )]
-    output_dimensionality: Option<usize>,
-}
-
-#[derive(Serialize)]
-struct GeminiContent<'a> {
-    parts: [GeminiPart<'a>; 1],
-}
-
-#[derive(Serialize)]
-struct GeminiPart<'a> {
-    text: &'a str,
-}
-
-#[derive(Deserialize)]
-struct GeminiResponse {
-    embeddings: Vec<GeminiEmbedding>,
-}
-
-#[derive(Deserialize)]
-struct GeminiEmbedding {
-    values: Vec<f32>,
-}
+mod providers;
 
 #[cfg(test)]
 mod tests;
