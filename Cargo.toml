@@ -6,9 +6,9 @@ rust-version = "1.85.1"
 authors = ["Jacob Heider <jhheider@gmail.com>"]
 repository = "https://github.com/jhheider/lean-embed"
 license = "MIT OR Apache-2.0"
-description = "Lean, provider-agnostic text-embeddings client for Voyage AI and Ollama, on rustls + ring (no OpenSSL, no aws-lc)."
+description = "Lean, provider-agnostic text-embeddings client for OpenAI, Gemini, Voyage, and Ollama, on rustls + ring (no OpenSSL, no aws-lc)."
 readme = "README.md"
-keywords = ["embeddings", "voyage", "ollama", "rustls", "ai"]
+keywords = ["embeddings", "openai", "gemini", "voyage", "ollama"]
 categories = ["api-bindings", "text-processing"]
 
 [dependencies]

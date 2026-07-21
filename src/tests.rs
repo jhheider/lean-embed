@@ -1,5 +1,5 @@
 use serde_json::json;
-use wiremock::matchers::{body_partial_json, method, path};
+use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
@@ -52,15 +52,67 @@ fn voyage_request_omits_dim_when_unset() {
 }
 
 #[test]
-fn voyage_response_parses_and_sorts_by_index() {
-    let r: VoyageResponse = serde_json::from_str(
+fn data_response_parses_and_sorts_by_index() {
+    // The shape shared by Voyage and OpenAI.
+    let r: DataResponse = serde_json::from_str(
         r#"{"data":[{"embedding":[2.0],"index":1},{"embedding":[1.0],"index":0}]}"#,
     )
     .unwrap();
-    let mut data = r.data;
-    data.sort_by_key(|d| d.index);
-    assert_eq!(data[0].embedding, vec![1.0]);
-    assert_eq!(data[1].embedding, vec![2.0]);
+    assert_eq!(sorted_by_index(r.data), vec![vec![1.0], vec![2.0]]);
+}
+
+#[test]
+fn openai_request_carries_encoding_format_and_dimensions() {
+    let body = OpenAiRequest {
+        input: &["q".to_string()],
+        model: "text-embedding-3-small",
+        encoding_format: "float",
+        dimensions: Some(512),
+    };
+    let j = serde_json::to_value(&body).unwrap();
+    assert_eq!(j["encoding_format"], "float");
+    assert_eq!(j["dimensions"], 512);
+    assert_eq!(j["model"], "text-embedding-3-small");
+}
+
+#[test]
+fn openai_request_omits_dimensions_when_unset() {
+    let body = OpenAiRequest {
+        input: &["q".to_string()],
+        model: "m",
+        encoding_format: "float",
+        dimensions: None,
+    };
+    let j = serde_json::to_value(&body).unwrap();
+    assert!(j.get("dimensions").is_none());
+}
+
+#[test]
+fn gemini_request_nests_content_and_maps_task_type() {
+    let body = GeminiRequest {
+        requests: vec![GeminiEmbedRequest {
+            model: "models/text-embedding-004",
+            content: GeminiContent {
+                parts: [GeminiPart { text: "hello" }],
+            },
+            task_type: EmbedKind::Query.gemini_task_type(),
+            output_dimensionality: Some(768),
+        }],
+    };
+    let j = serde_json::to_value(&body).unwrap();
+    assert_eq!(j["requests"][0]["model"], "models/text-embedding-004");
+    assert_eq!(j["requests"][0]["content"]["parts"][0]["text"], "hello");
+    assert_eq!(j["requests"][0]["taskType"], "RETRIEVAL_QUERY");
+    assert_eq!(j["requests"][0]["outputDimensionality"], 768);
+}
+
+#[test]
+fn gemini_response_parses_values() {
+    let r: GeminiResponse =
+        serde_json::from_str(r#"{"embeddings":[{"values":[0.1,0.2]},{"values":[0.3,0.4]}]}"#)
+            .unwrap();
+    assert_eq!(r.embeddings.len(), 2);
+    assert_eq!(r.embeddings[1].values, vec![0.3, 0.4]);
 }
 
 // ---- Builder / config ----------------------------------------------------
@@ -421,4 +473,135 @@ fn error_display_strings() {
         env: VOYAGE_API_KEY_ENV,
     };
     assert!(missing.to_string().contains("VOYAGE_API_KEY"));
+}
+
+// ---- OpenAI + Gemini builder / round-trip --------------------------------
+
+#[test]
+fn openai_and_gemini_base_url_defaults() {
+    let openai = Client::builder(Provider::OpenAi, "m")
+        .api_key("k")
+        .build()
+        .unwrap();
+    assert_eq!(openai.base_url, "https://api.openai.com/v1");
+    let gemini = Client::builder(Provider::Gemini, "m")
+        .api_key("k")
+        .build()
+        .unwrap();
+    assert_eq!(
+        gemini.base_url,
+        "https://generativelanguage.googleapis.com/v1beta"
+    );
+}
+
+#[test]
+fn keyed_providers_error_without_a_key_when_env_unset() {
+    for (provider, env) in [
+        (Provider::OpenAi, OPENAI_API_KEY_ENV),
+        (Provider::Gemini, GEMINI_API_KEY_ENV),
+    ] {
+        if std::env::var(env).is_ok() {
+            continue; // keep deterministic without mutating process env
+        }
+        let err = Client::builder(provider, "m").build().unwrap_err();
+        assert!(matches!(err, Error::MissingApiKey { .. }));
+    }
+}
+
+#[tokio::test]
+async fn openai_round_trip_sorts_and_sends_dimensions() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/embeddings"))
+        .and(body_partial_json(
+            json!({"encoding_format": "float", "dimensions": 2}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [
+                {"embedding": [9.0, 9.0], "index": 1},
+                {"embedding": [1.0, 1.0], "index": 0}
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::OpenAi, "text-embedding-3-small")
+        .api_key("k")
+        .base_url(server.uri())
+        .output_dimension(2)
+        .build()
+        .unwrap();
+    let v = client
+        .embed(&["x".into(), "y".into()], EmbedKind::Document)
+        .await
+        .unwrap();
+    // Sorted back into input order despite the out-of-order response.
+    assert_eq!(v, vec![vec![1.0, 1.0], vec![9.0, 9.0]]);
+}
+
+#[tokio::test]
+async fn gemini_round_trip_uses_header_auth_and_task_type() {
+    let server = MockServer::start().await;
+    // Model is `models/`-prefixed in the path; auth is the x-goog-api-key header;
+    // the body carries the query taskType and pinned dimensionality.
+    Mock::given(method("POST"))
+        .and(path("/models/text-embedding-004:batchEmbedContents"))
+        .and(header("x-goog-api-key", "secret"))
+        .and(body_partial_json(json!({
+            "requests": [{"taskType": "RETRIEVAL_QUERY", "outputDimensionality": 3}]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "embeddings": [{"values": [1.0, 2.0, 3.0]}]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Client::builder(Provider::Gemini, "text-embedding-004")
+        .api_key("secret")
+        .base_url(server.uri())
+        .output_dimension(3)
+        .build()
+        .unwrap();
+    let v = client
+        .embed(&["a question".into()], EmbedKind::Query)
+        .await
+        .unwrap();
+    assert_eq!(v, vec![vec![1.0, 2.0, 3.0]]);
+}
+
+#[tokio::test]
+async fn gemini_accepts_already_prefixed_model() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/models/text-embedding-004:batchEmbedContents"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"embeddings": [{"values": [0.5]}]})),
+        )
+        .mount(&server)
+        .await;
+    // Passing the model already `models/`-prefixed must not double-prefix.
+    let client = Client::builder(Provider::Gemini, "models/text-embedding-004")
+        .api_key("k")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+    let v = client
+        .embed(&["x".into()], EmbedKind::Document)
+        .await
+        .unwrap();
+    assert_eq!(v, vec![vec![0.5]]);
+}
+
+#[test]
+fn api_key_is_redacted_in_debug() {
+    let client = Client::builder(Provider::OpenAi, "m")
+        .api_key("super-secret-key")
+        .build()
+        .unwrap();
+    let dbg = format!("{client:?}");
+    assert!(
+        !dbg.contains("super-secret-key"),
+        "key leaked in Debug: {dbg}"
+    );
+    assert!(dbg.contains("<redacted>"));
 }
