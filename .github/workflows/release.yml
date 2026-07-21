@@ -1,23 +1,21 @@
 name: Release
 
-# lean-embed is a pure library, so it does NOT use jhheider/rust-ci's release.yml
-# (that reusable is binary-first: bin-name + targets are required, and it builds
-# per-target archives + a Homebrew tap that a library has no use for). This is a
-# minimal crate-publish: cut a GitHub release and it publishes to crates.io.
-# Runs on the self-hosted runner while the repo is private. If rust-ci later
-# grows a lib-only publish workflow, switch to it.
+# Thin caller over jhheider/rust-ci's reusable release (lib-only publish path,
+# added in rust-ci v1.7.0): no bin-name/targets, so the build/attach and tap
+# jobs skip and only the crates.io publish runs. Publishing is public, so this
+# runs on hosted runners (unlike ci/style/audit, which self-host for the private
+# repo). Needs the CARGO_REGISTRY_TOKEN repo secret; cut a GitHub release to fire.
 on:
   release:
     types: [published]
-  workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 jobs:
-  publish:
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Publish to crates.io
-        run: cargo publish --locked
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+  release:
+    uses: jhheider/rust-ci/.github/workflows/release.yml@v1
+    with:
+      publish-crates: true
+      crates: lean-embed
+    secrets: inherit
