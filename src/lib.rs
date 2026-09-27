@@ -73,8 +73,9 @@ pub const GEMINI_API_KEY_ENV: &str = "GEMINI_API_KEY";
 #[non_exhaustive]
 pub enum Provider {
     /// A local Ollama server (`{base_url}/api/embed`, default
-    /// `http://localhost:11434`). No API key, works offline; ignores
-    /// [`EmbedKind`].
+    /// `http://localhost:11434`). No API key, works offline; honours
+    /// [`EmbedKind`] with nomic-style task prefixes (`search_query: ` /
+    /// `search_document: `) for `nomic-embed-text*` models.
     Ollama,
     /// Voyage AI (`{base_url}/embeddings`, default `https://api.voyageai.com/v1`).
     /// Needs [`VOYAGE_API_KEY_ENV`]; honours `input_type` ([`EmbedKind`]) and
@@ -127,7 +128,8 @@ impl Provider {
 
 /// Whether a batch is stored **documents** or a search **query**. Voyage uses
 /// this for asymmetric retrieval (query- and document-side vectors differ, which
-/// retrieves better); Ollama ignores it.
+/// retrieves better); Ollama applies the model's task prefix (nomic-style
+/// `search_query: ` / `search_document: ` for `nomic-embed-text*`).
 ///
 /// `#[non_exhaustive]` because the set of input types is a provider-defined
 /// vocabulary that may grow; match with a `_ =>` arm.
@@ -445,7 +447,7 @@ impl Client {
         let mut out = Vec::with_capacity(texts.len());
         for chunk in texts.chunks(batch) {
             let vectors = match self.provider {
-                Provider::Ollama => providers::ollama::embed(self, chunk).await?,
+                Provider::Ollama => providers::ollama::embed(self, chunk, kind).await?,
                 Provider::Voyage => providers::voyage::embed(self, chunk, kind).await?,
                 Provider::OpenAi => providers::openai::embed(self, chunk).await?,
                 Provider::Gemini => providers::gemini::embed(self, chunk, kind).await?,

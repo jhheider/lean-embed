@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-09-27
+
+### Changed
+
+- **Ollama provider honours `EmbedKind` for `nomic-embed-text*` models**: the
+  request now carries nomic's trained task prefixes (`search_query: ` on
+  queries, `search_document: ` on stored documents). Ollama's nomic modelfile
+  is a bare `{{ .Prompt }}` that accepts `input_type` without applying it
+  (verified against Ollama 0.32.15), so without client-side prefixes every
+  embedding was effectively an unprompted document - measurable retrieval
+  loss for asymmetric queries. Other models are untouched; extend the keyed
+  list in `providers/ollama.rs` when another model needs a scheme.
+
 ## [Unreleased]
 
 ### Security
