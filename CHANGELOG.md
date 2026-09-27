@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Lockfile: bump h2 to 0.4.19 (RUSTSEC-2026-0258) and rustls to 0.23.45
+  (RUSTSEC-2026-0285). Downstream crates resolve their own lockfiles; run
+  `cargo update -p h2 -p rustls` to pick up the fixes.
+
 ## [0.1.0] - 2026-07-20
 
 ### Added
