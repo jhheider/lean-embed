@@ -15,7 +15,11 @@ use lean_embed::{Client, EmbedKind, Provider};
 const MODEL: &str = "nomic-embed-text";
 
 fn client() -> Client {
+    // Opt in so the live suite exercises the prefixed path (semantic
+    // sanity below is the end-to-end proof); default-off behavior is
+    // covered by unit tests and was 0.1.0's shipped behavior.
     Client::builder(Provider::Ollama, MODEL)
+        .task_prefixes(true)
         .build()
         .expect("build ollama client")
 }
@@ -82,6 +86,7 @@ async fn max_batch_splitting_preserves_order_live() {
 
     let split_client = Client::builder(Provider::Ollama, MODEL)
         .max_batch(1)
+        .task_prefixes(true)
         .build()
         .unwrap();
     let split = split_client

@@ -73,9 +73,10 @@ pub const GEMINI_API_KEY_ENV: &str = "GEMINI_API_KEY";
 #[non_exhaustive]
 pub enum Provider {
     /// A local Ollama server (`{base_url}/api/embed`, default
-    /// `http://localhost:11434`). No API key, works offline; honours
-    /// [`EmbedKind`] with nomic-style task prefixes (`search_query: ` /
-    /// `search_document: `) for `nomic-embed-text*` models.
+    /// `http://localhost:11434`). No API key, works offline; with
+    /// [`ClientBuilder::task_prefixes`] on, honours [`EmbedKind`] via
+    /// nomic-style task prefixes (`search_query: ` / `search_document: `)
+    /// for `nomic-embed-text*` models.
     Ollama,
     /// Voyage AI (`{base_url}/embeddings`, default `https://api.voyageai.com/v1`).
     /// Needs [`VOYAGE_API_KEY_ENV`]; honours `input_type` ([`EmbedKind`]) and
@@ -128,8 +129,8 @@ impl Provider {
 
 /// Whether a batch is stored **documents** or a search **query**. Voyage uses
 /// this for asymmetric retrieval (query- and document-side vectors differ, which
-/// retrieves better); Ollama applies the model's task prefix (nomic-style
-/// `search_query: ` / `search_document: ` for `nomic-embed-text*`).
+/// retrieves better); Ollama uses it for model task prefixes when
+/// [`ClientBuilder::task_prefixes`] is enabled.
 ///
 /// `#[non_exhaustive]` because the set of input types is a provider-defined
 /// vocabulary that may grow; match with a `_ =>` arm.
@@ -273,6 +274,7 @@ pub struct ClientBuilder {
     output_dimension: Option<usize>,
     timeout: Duration,
     max_batch: Option<usize>,
+    task_prefixes: bool,
 }
 
 /// Render `Option<String>` API keys as presence-only, never the secret itself.
@@ -290,6 +292,7 @@ impl std::fmt::Debug for ClientBuilder {
             .field("output_dimension", &self.output_dimension)
             .field("timeout", &self.timeout)
             .field("max_batch", &self.max_batch)
+            .field("task_prefixes", &self.task_prefixes)
             .finish()
     }
 }
@@ -331,6 +334,21 @@ impl ClientBuilder {
     /// in a single request. `0` is treated as `1`.
     pub fn max_batch(mut self, max_batch: usize) -> Self {
         self.max_batch = Some(max_batch.max(1));
+        self
+    }
+
+    /// Apply model-specific task prefixes where the provider has no
+    /// native asymmetric-retrieval knob. Currently only Ollama
+    /// `nomic-embed-text*` models (nomic's trained `search_query: ` /
+    /// `search_document: ` instructions - Ollama's modelfile template
+    /// does not apply them for you).
+    ///
+    /// Default **off** for reproducibility: an index built without
+    /// prefixes must keep querying without them, or stored and query
+    /// vectors silently mix schemes. Enable when building a fresh (or
+    /// re-embedded) index and keep it enabled for that index's life.
+    pub fn task_prefixes(mut self, on: bool) -> Self {
+        self.task_prefixes = on;
         self
     }
 
@@ -380,6 +398,7 @@ impl ClientBuilder {
             api_key,
             output_dimension: self.output_dimension,
             max_batch: self.max_batch,
+            task_prefixes: self.task_prefixes,
         })
     }
 }
@@ -395,6 +414,7 @@ pub struct Client {
     api_key: Option<String>,
     output_dimension: Option<usize>,
     max_batch: Option<usize>,
+    task_prefixes: bool,
 }
 
 impl std::fmt::Debug for Client {
@@ -421,6 +441,7 @@ impl Client {
             output_dimension: None,
             timeout: DEFAULT_TIMEOUT,
             max_batch: None,
+            task_prefixes: false,
         }
     }
 

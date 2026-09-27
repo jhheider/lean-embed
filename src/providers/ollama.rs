@@ -13,7 +13,7 @@ pub(crate) async fn embed(
     kind: EmbedKind,
 ) -> Result<Vec<Vec<f32>>, Error> {
     let url = format!("{}/api/embed", client.base_url);
-    let input = prepare_input(&client.model, texts, kind);
+    let input = prepare_input(&client.model, texts, kind, client.task_prefixes);
     let body = OllamaRequest {
         model: &client.model,
         input: &input,
@@ -41,12 +41,14 @@ struct OllamaResponse {
     embeddings: Vec<Vec<f32>>,
 }
 
-/// Nomic-style task instructions: the published nomic-embed-text model
-/// is trained with `search_query: ` / `search_document: ` prefixes, and
-/// Ollama's nomic modelfile template is a bare `{{ .Prompt }}` - it
-/// accepts `input_type` but does not apply it (verified against Ollama
-/// 0.32.15: raw == input_type, raw != prefixed). Other models get no
-/// munging; extend this keyed list when a model needs its own scheme.
+/// Nomic-style task instructions, applied only when the builder opted
+/// in (`ClientBuilder::task_prefixes`): the published nomic-embed-text
+/// model is trained with `search_query: ` / `search_document: `
+/// prefixes, and Ollama's nomic modelfile template is a bare
+/// `{{ .Prompt }}` - it accepts `input_type` but does not apply it
+/// (verified against Ollama 0.32.15: raw == input_type, raw !=
+/// prefixed). Other models get no munging; extend this keyed list when
+/// a model needs its own scheme.
 fn task_prefix(model: &str, kind: EmbedKind) -> Option<&'static str> {
     if model.starts_with("nomic-embed-text") {
         Some(match kind {
@@ -59,7 +61,10 @@ fn task_prefix(model: &str, kind: EmbedKind) -> Option<&'static str> {
 }
 
 /// Apply the model's task prefix, if it has one.
-fn prepare_input(model: &str, texts: &[String], kind: EmbedKind) -> Vec<String> {
+fn prepare_input(model: &str, texts: &[String], kind: EmbedKind, enabled: bool) -> Vec<String> {
+    if !enabled {
+        return texts.to_vec();
+    }
     match task_prefix(model, kind) {
         Some(prefix) => texts.iter().map(|t| format!("{prefix}{t}")).collect(),
         None => texts.to_vec(),
@@ -84,18 +89,23 @@ mod tests {
     }
 
     #[test]
-    fn prepare_input_applies_prefix_only_to_matching_models() {
+    fn prepare_input_is_opt_in() {
         let texts = vec!["grappling".to_string()];
         assert_eq!(
-            prepare_input("nomic-embed-text", &texts, EmbedKind::Query),
+            prepare_input("nomic-embed-text", &texts, EmbedKind::Query, true),
             ["search_query: grappling"]
         );
         assert_eq!(
-            prepare_input("nomic-embed-text", &texts, EmbedKind::Document),
+            prepare_input("nomic-embed-text", &texts, EmbedKind::Document, true),
             ["search_document: grappling"]
         );
         assert_eq!(
-            prepare_input("bge-m3", &texts, EmbedKind::Query),
+            prepare_input("bge-m3", &texts, EmbedKind::Query, true),
+            ["grappling"]
+        );
+        // Off (the default): byte-identical input to 0.1.0.
+        assert_eq!(
+            prepare_input("nomic-embed-text", &texts, EmbedKind::Query, false),
             ["grappling"]
         );
     }
