@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-09-28
+
+### Security
+
+- Require rustls 0.23.45 or later (RUSTSEC-2026-0285: TLS 1.3 handshake
+  messages accepted across encryption levels), so downstream lockfiles
+  can no longer resolve an affected version.
+
 ## [0.1.1] - 2026-09-27 (yanked)
 
 > **Yanked** (replaced by 0.1.2): prefixes were on by default, which
