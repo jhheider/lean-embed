@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-11-12
+
+### Security
+
+- Require rustls 0.23.46 or later (RUSTSEC-2026-0346 to RUSTSEC-2026-0349),
+  and update the lockfile for the RustSec advisories of late October 2026.
+
 ## [0.1.3] - 2026-09-28
 
 ### Security
